@@ -36,10 +36,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       if (req.method === 'GET') {
         const token = req.headers.authorization?.split(' ')[1]
-        if ((req.query.all === '1' || req.query.all === 'true') && token) {
-          // verify token
-          const { data: userData } = await supabaseServer.auth.getUser(token)
-          if (!userData?.user) return res.status(401).json({ message: 'Unauthorized' })
+        if ((req.query.all === '1' || req.query.all === 'true')) {
+          // require admin token and email whitelist
+          if (!token) return res.status(401).json({ message: 'Unauthorized' })
+          const { data: userData, error: userErr } = await supabaseServer.auth.getUser(token)
+          if (userErr || !userData?.user) return res.status(401).json({ message: 'Unauthorized' })
+          const adminEmails = (process.env.SUPABASE_ADMIN_EMAILS || '').split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
+          const userEmail = (userData.user.email || '').toLowerCase()
+          if (!adminEmails.includes(userEmail)) return res.status(403).json({ message: 'Forbidden' })
           const rows = await getAllFromSupabase()
           return res.status(200).json(rows)
         }
@@ -59,8 +63,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (req.method === 'PUT') {
         const token = req.headers.authorization?.split(' ')[1]
         if (!token) return res.status(401).json({ message: 'Unauthorized' })
-        const { data: userData } = await supabaseServer.auth.getUser(token)
-        if (!userData?.user) return res.status(401).json({ message: 'Unauthorized' })
+        const { data: userData, error: userErr } = await supabaseServer.auth.getUser(token)
+        if (userErr || !userData?.user) return res.status(401).json({ message: 'Unauthorized' })
+        const adminEmails = (process.env.SUPABASE_ADMIN_EMAILS || '').split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
+        const userEmail = (userData.user.email || '').toLowerCase()
+        if (!adminEmails.includes(userEmail)) return res.status(403).json({ message: 'Forbidden' })
 
         const { id, approved } = req.body
         const { error } = await supabaseServer.from('prayers').update({ approved: !!approved }).eq('id', id)
@@ -79,10 +86,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   ensure()
   const raw = fs.readFileSync(FILE, 'utf-8')
   const items = JSON.parse(raw)
+  const devAdminToken = process.env.DEV_ADMIN_TOKEN || ''
 
   if (req.method === 'GET') {
-    // Allow admin view to fetch all submissions with ?all=1
+    // Allow admin view to fetch all submissions with ?all=1 when dev token provided
     if (req.query.all === '1' || req.query.all === 'true') {
+      const token = req.headers.authorization?.split(' ')[1]
+      if (!token || token !== devAdminToken) return res.status(401).json({ message: 'Unauthorized (dev token required)' })
       return res.status(200).json(items)
     }
     return res.status(200).json(items.filter((i: any) => i.approved))
@@ -99,6 +109,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === 'PUT') {
+    const token = req.headers.authorization?.split(' ')[1]
+    if (!token || token !== devAdminToken) return res.status(401).json({ message: 'Unauthorized (dev token required)' })
     const { id, approved } = req.body
     const idx = items.findIndex((i: any) => i.id === id)
     if (idx === -1) return res.status(404).json({ message: 'Not found' })

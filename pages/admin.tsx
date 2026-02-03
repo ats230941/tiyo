@@ -3,28 +3,65 @@ import useSWR from 'swr'
 import { useEffect, useState } from 'react'
 import { supabase } from '../src/lib/supabaseClient'
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+const fetcher = (url: string) => fetch(url).then((r) => r.ok ? r.json() : Promise.reject(new Error('Fetch error')))
 
 export default function AdminPage() {
   const [session, setSession] = useState<any>(null)
-  const { data, mutate } = useSWR(session ? '/api/prayers?all=1' : '/api/prayers', fetcher)
+  // Always fetch the public (approved) list for the main area. Full list is fetched in AllSubmissions with auth.
+  const { data, mutate } = useSWR('/api/prayers', fetcher)
+
+  const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
+    let sub: any
     const getSession = async () => {
-      const { data } = await supabase.auth.getSession()
-      setSession(data.session)
+      const { data, error } = await supabase.auth.getSession()
+      if (!error) {
+        const session = data?.session ?? null
+        setSession(session)
+        // check admin status
+        const token = session?.access_token
+        if (token) {
+          const r = await fetch('/api/admin-check', { headers: { Authorization: `Bearer ${token}` } })
+          const j = await r.json().catch(() => ({ isAdmin: false }))
+          setIsAdmin(!!j.isAdmin)
+        } else {
+          setIsAdmin(false)
+        }
+      }
     }
     getSession()
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
+    const resp = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setSession(session ?? null)
+      const token = session?.access_token
+      if (token) {
+        const r = await fetch('/api/admin-check', { headers: { Authorization: `Bearer ${token}` } })
+        const j = await r.json().catch(() => ({ isAdmin: false }))
+        setIsAdmin(!!j.isAdmin)
+      } else {
+        setIsAdmin(false)
+      }
     })
-    return () => sub.subscription.unsubscribe()
+    sub = resp?.data?.subscription
+
+    return () => sub?.unsubscribe?.()
   }, [])
 
   async function toggleApprove(id: number, approved: boolean) {
+    if (!isAdmin) { alert('You are not authorized to perform this action.'); return }
     const token = (await supabase.auth.getSession()).data.session?.access_token
-    await fetch('/api/prayers', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ id, approved }) })
+    if (!token) {
+      alert('You must be signed in to perform this action.')
+      return
+    }
+
+    const res = await fetch('/api/prayers', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ id, approved }) })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: 'Unknown error' }))
+      alert('Error: ' + (err.message || 'Failed to update'))
+      return
+    }
     mutate()
   }
 
@@ -36,7 +73,8 @@ export default function AdminPage() {
 
         {!session ? <AuthBox /> : (
           <div>
-            <div className="text-sm text-slate-600">Signed in as <strong>{session.user.email}</strong></div>
+            <div className="text-sm text-slate-600">Signed in as <strong>{session.user?.email}</strong></div>
+            {!isAdmin && <div className="mt-2 p-2 rounded bg-yellow-50 text-yellow-700 text-sm">You are signed in but not an admin. To become an admin, ask the site owner to add your email to <code className="bg-white px-1 rounded">SUPABASE_ADMIN_EMAILS</code> or, for local development, set <code className="bg-white px-1 rounded">DEV_ADMIN_TOKEN</code> and use it as a bearer token.</div>}
 
             <div className="mt-4 space-y-3">
               {data?.length === 0 && <div className="text-sm text-slate-500">No published requests.</div>}
@@ -47,7 +85,7 @@ export default function AdminPage() {
                     <div className="text-xs text-slate-500 mt-1">{p.name ? `${p.name}` : 'Anonymous'}</div>
                   </div>
                   <div className="space-x-2">
-                    <button onClick={() => toggleApprove(p.id, false)} className="text-sm text-red-600">Remove</button>
+                    <button disabled={!isAdmin} onClick={() => toggleApprove(p.id, false)} className={`text-sm ${isAdmin ? 'text-red-600' : 'text-slate-400 cursor-not-allowed'}`}>{isAdmin ? 'Remove' : 'Not authorized'}</button>
                   </div>
                 </div>
               ))}
@@ -55,7 +93,7 @@ export default function AdminPage() {
 
             <details className="mt-6">
               <summary className="text-sm text-slate-600">View all submissions (including unapproved)</summary>
-              <AllSubmissions token={(session as any).access_token} />
+              <AllSubmissions token={session?.access_token || (session as any)?.access_token} />
             </details>
 
             <div className="mt-4">
@@ -95,20 +133,24 @@ function AuthBox() {
 }
 
 function AllSubmissions({ token }: { token?: string }) {
-  const { data, mutate } = useSWR(token ? ['/api/prayers?all=1', token] : null, async ([url, token]) => {
+  const { data, mutate, isValidating } = useSWR(token ? ['/api/prayers?all=1', token] : null, async ([url, token]) => {
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` }})
+    if (!r.ok) throw new Error('Failed to fetch')
     return r.json()
   })
 
   async function setApproved(id: number, approved: boolean) {
     const token = (await supabase.auth.getSession()).data.session?.access_token
-    await fetch('/api/prayers', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ id, approved }) })
+    if (!token) { alert('Sign in required'); return }
+    const res = await fetch('/api/prayers', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ id, approved }) })
+    if (!res.ok) { alert('Failed to update'); return }
     mutate()
   }
 
   return (
     <div className="mt-3 space-y-3">
-      {data?.length === 0 && <div className="text-sm text-slate-500">No submissions yet.</div>}
+      {isValidating && <div className="text-sm text-slate-500">Loading…</div>}
+      {data?.length === 0 && !isValidating && <div className="text-sm text-slate-500">No submissions yet.</div>}
       {data?.map((p: any) => (
         <div key={p.id} className="p-3 border rounded flex justify-between items-center">
           <div>

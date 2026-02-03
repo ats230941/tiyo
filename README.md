@@ -56,6 +56,24 @@ Open http://localhost:3000
 ## Supabase & Sanity (added)
 - Supabase is supported for prayer request storage and admin auth (magic links). Configure the following environment variables (see `.env.example`): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
 
+  There is an email whitelist for admin actions controlled by `SUPABASE_ADMIN_EMAILS` (comma-separated). For example:
+
+  ```env
+  SUPABASE_ADMIN_EMAILS=personal3194@hotmail.com
+  ```
+
+  For local development (when Supabase is not configured), you may set `DEV_ADMIN_TOKEN` to a secret value and use it as a bearer token for admin actions:
+
+  ```env
+  DEV_ADMIN_TOKEN=localdev-secret-abc123
+  ```
+
+  Example (use with `curl` to view all submissions locally):
+
+  ```bash
+  curl -H "Authorization: Bearer localdev-secret-abc123" http://localhost:3000/api/prayers?all=1
+  ```
+
   SQL to create the `prayers` table (run in the Supabase SQL editor):
 
   ```sql
