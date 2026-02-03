@@ -1,0 +1,51 @@
+name: PR Preview Build & Deploy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Install
+        run: npm ci
+      - name: Build
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-${{ github.head_ref || github.sha }}
+          path: |
+            .next
+            public
+
+      - name: Optional: Deploy to Cloudflare Pages
+        if: ${{ secrets.CF_API_TOKEN != '' && secrets.CF_ACCOUNT_ID != '' && secrets.CF_PAGES_PROJECT_NAME != '' }}
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          projectName: ${{ secrets.CF_PAGES_PROJECT_NAME }}
+          directory: '.'
+
+      - name: Notify PR with preview info
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request
+            const artifactName = `preview-${context.payload.pull_request.head.ref || context.sha}`
+            const parts = []
+            parts.push('A preview build is available as an artifact in this workflow run: **' + artifactName + '**.')
+            if (process.env.CF_API_TOKEN && process.env.CF_ACCOUNT_ID && process.env.CF_PAGES_PROJECT_NAME) {
+              parts.push('If Cloudflare deploy was enabled, check the **Deploy to Cloudflare Pages** step for the deployed URL.')
+            } else {
+              parts.push('Cloudflare deploy is not configured for previews. To enable automatic PR deploys, add the repository secrets `CF_API_TOKEN`, `CF_ACCOUNT_ID`, and `CF_PAGES_PROJECT_NAME`.')
+            }
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: pr.number, body: parts.join('\n\n') })
