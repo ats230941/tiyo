@@ -74,6 +74,8 @@ Open http://localhost:3000
   curl -H "Authorization: Bearer localdev-secret-abc123" http://localhost:3000/api/prayers?all=1
   ```
 
+  Note: For your convenience I set `ADMIN_ENABLED=true` in `.env.example` so admin features are enabled for staging/testing. Before going to production, set `ADMIN_ENABLED=false` and remove or rotate any `DEV_ADMIN_TOKEN` values to avoid accidental exposure of admin actions.
+
   SQL to create the `prayers` table (run in the Supabase SQL editor):
 
   ```sql
