@@ -11,6 +11,7 @@ export default function AdminPage() {
   const { data, mutate } = useSWR('/api/prayers', fetcher)
 
   const [isAdmin, setIsAdmin] = useState(false)
+  const [adminDisabled, setAdminDisabled] = useState(false)
 
   useEffect(() => {
     let sub: any
@@ -23,10 +24,12 @@ export default function AdminPage() {
         const token = session?.access_token
         if (token) {
           const r = await fetch('/api/admin-check', { headers: { Authorization: `Bearer ${token}` } })
-          const j = await r.json().catch(() => ({ isAdmin: false }))
+          const j = await r.json().catch(() => ({ isAdmin: false, disabled: false }))
           setIsAdmin(!!j.isAdmin)
+          setAdminDisabled(!!j.disabled)
         } else {
           setIsAdmin(false)
+          setAdminDisabled(false)
         }
       }
     }
@@ -37,10 +40,12 @@ export default function AdminPage() {
       const token = session?.access_token
       if (token) {
         const r = await fetch('/api/admin-check', { headers: { Authorization: `Bearer ${token}` } })
-        const j = await r.json().catch(() => ({ isAdmin: false }))
+        const j = await r.json().catch(() => ({ isAdmin: false, disabled: false }))
         setIsAdmin(!!j.isAdmin)
+        setAdminDisabled(!!j.disabled)
       } else {
         setIsAdmin(false)
+        setAdminDisabled(false)
       }
     })
     sub = resp?.data?.subscription
@@ -74,7 +79,8 @@ export default function AdminPage() {
         {!session ? <AuthBox /> : (
           <div>
             <div className="text-sm text-slate-600">Signed in as <strong>{session.user?.email}</strong></div>
-            {!isAdmin && <div className="mt-2 p-2 rounded bg-yellow-50 text-yellow-700 text-sm">You are signed in but not an admin. To become an admin, ask the site owner to add your email to <code className="bg-white px-1 rounded">SUPABASE_ADMIN_EMAILS</code> or, for local development, set <code className="bg-white px-1 rounded">DEV_ADMIN_TOKEN</code> and use it as a bearer token.</div>}
+            {!isAdmin && !adminDisabled && <div className="mt-2 p-2 rounded bg-yellow-50 text-yellow-700 text-sm">You are signed in but not an admin. To become an admin, ask the site owner to add your email to <code className="bg-white px-1 rounded">SUPABASE_ADMIN_EMAILS</code> or, for local development, set <code className="bg-white px-1 rounded">DEV_ADMIN_TOKEN</code> and use it as a bearer token.</div>}
+            {adminDisabled && <div className="mt-2 p-2 rounded bg-red-50 text-red-700 text-sm">Admin features are currently disabled while the site is staged. Admin actions (approve/reject, view all submissions) are temporarily unavailable.</div>}
 
             <div className="mt-4 space-y-3">
               {data?.length === 0 && <div className="text-sm text-slate-500">No published requests.</div>}
@@ -112,6 +118,11 @@ function AuthBox() {
 
   async function sendLink(e: React.FormEvent) {
     e.preventDefault()
+    // respect adminDisabled (no sign-ins while admin is disabled)
+    const r = await fetch('/api/admin-check')
+    const j = await r.json().catch(() => ({ disabled: false }))
+    if (j.disabled) { setMsg('Admin sign-in is temporarily disabled.'); return }
+
     setMsg('Sending sign-in link…')
     const { error } = await supabase.auth.signInWithOtp({ email })
     if (error) setMsg('Error: ' + error.message)
@@ -140,6 +151,9 @@ function AllSubmissions({ token }: { token?: string }) {
   })
 
   async function setApproved(id: number, approved: boolean) {
+    const r = await fetch('/api/admin-check')
+    const j = await r.json().catch(() => ({ disabled: false }))
+    if (j.disabled) { alert('Admin actions are temporarily disabled'); return }
     const token = (await supabase.auth.getSession()).data.session?.access_token
     if (!token) { alert('Sign in required'); return }
     const res = await fetch('/api/prayers', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ id, approved }) })
@@ -158,8 +172,8 @@ function AllSubmissions({ token }: { token?: string }) {
             <div className="text-xs text-slate-500 mt-1">{p.name ? `${p.name}` : 'Anonymous'} • {new Date(p.created_at || p.createdAt).toLocaleString()}</div>
           </div>
           <div className="space-x-2">
-            <button onClick={() => setApproved(p.id, true)} className="text-sm text-amber-600">Approve</button>
-            <button onClick={() => setApproved(p.id, false)} className="text-sm text-red-600">Reject</button>
+            <button disabled={adminDisabled} onClick={() => setApproved(p.id, true)} className={`text-sm ${adminDisabled ? 'text-slate-400 cursor-not-allowed' : 'text-amber-600'}`}>{adminDisabled ? 'Disabled' : 'Approve'}</button>
+            <button disabled={adminDisabled} onClick={() => setApproved(p.id, false)} className={`text-sm ${adminDisabled ? 'text-slate-400 cursor-not-allowed' : 'text-red-600'}`}>{adminDisabled ? 'Disabled' : 'Reject'}</button>
           </div>
         </div>
       ))}

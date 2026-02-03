@@ -35,8 +35,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (useSupabase) {
     try {
       if (req.method === 'GET') {
+        // Admin operations can be toggled off via ADMIN_ENABLED env var for staging/development
+        const adminEnabled = process.env.ADMIN_ENABLED === 'true'
         const token = req.headers.authorization?.split(' ')[1]
         if ((req.query.all === '1' || req.query.all === 'true')) {
+          if (!adminEnabled) return res.status(503).json({ message: 'Admin actions are temporarily disabled' })
           // require admin token and email whitelist
           if (!token) return res.status(401).json({ message: 'Unauthorized' })
           const { data: userData, error: userErr } = await supabaseServer.auth.getUser(token)
@@ -61,6 +64,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       if (req.method === 'PUT') {
+        const adminEnabled = process.env.ADMIN_ENABLED === 'true'
+        if (!adminEnabled) return res.status(503).json({ message: 'Admin actions are temporarily disabled' })
         const token = req.headers.authorization?.split(' ')[1]
         if (!token) return res.status(401).json({ message: 'Unauthorized' })
         const { data: userData, error: userErr } = await supabaseServer.auth.getUser(token)
@@ -91,6 +96,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === 'GET') {
     // Allow admin view to fetch all submissions with ?all=1 when dev token provided
     if (req.query.all === '1' || req.query.all === 'true') {
+      const adminEnabled = process.env.ADMIN_ENABLED === 'true'
+      if (!adminEnabled) return res.status(503).json({ message: 'Admin actions are temporarily disabled' })
       const token = req.headers.authorization?.split(' ')[1]
       if (!token || token !== devAdminToken) return res.status(401).json({ message: 'Unauthorized (dev token required)' })
       return res.status(200).json(items)
@@ -109,6 +116,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   if (req.method === 'PUT') {
+    const adminEnabled = process.env.ADMIN_ENABLED === 'true'
+    if (!adminEnabled) return res.status(503).json({ message: 'Admin actions are temporarily disabled' })
     const token = req.headers.authorization?.split(' ')[1]
     if (!token || token !== devAdminToken) return res.status(401).json({ message: 'Unauthorized (dev token required)' })
     const { id, approved } = req.body
